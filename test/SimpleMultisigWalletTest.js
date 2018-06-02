@@ -1,5 +1,5 @@
-let MultiSigWallet = artifacts.require("./SimpleMultiSigWallet.sol");
-let Token = artifacts.require("./OrcaToken.sol");
+let MultiSigWallet = artifacts.require("./multisig/SimpleMultiSigWallet.sol");
+let Token = artifacts.require("./multisig/OrcaToken.sol");
 
 contract('SimpleMultiSigWallet', function (accounts) {
 
