@@ -43,7 +43,7 @@ contract ERC777TokenTimelock is ERC820Implementer, ERC777TokensRecipient {
         uint256 amount = token.balanceOf(address(this));
         require(amount > 0);
 
-        token.send(beneficiary, amount);
+        token.send(beneficiary, amount, "");
     }
 
 

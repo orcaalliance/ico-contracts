@@ -55,7 +55,7 @@ contract ERC777TokenScheduledTimelock is ERC820Implementer, ERC777TokensRecipien
         }
         if (tokens > 0) {
             totalVested = totalVested.sub(tokens);
-            token.send(_to, tokens);
+            token.send(_to, tokens, "");
             emit Released(_to, tokens);
         }
     }

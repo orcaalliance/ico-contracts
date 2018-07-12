@@ -1,4 +1,4 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
@@ -70,13 +70,6 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
     /// @param _tokenHolder Address for which the balance is returned
     /// @return the balance of `_tokenAddress`.
     function balanceOf(address _tokenHolder) public view returns (uint256) { return balances[_tokenHolder]; }
-
-    /// @notice Send `_amount` of tokens to address `_to`
-    /// @param _to The address of the recipient
-    /// @param _amount The number of tokens to be sent
-    function send(address _to, uint256 _amount) public {
-        doSend(msg.sender, _to, _amount, "", msg.sender, "", true);
-    }
 
     /// @notice Send `_amount` of tokens to address `_to` passing `_userData` to the recipient
     /// @param _to The address of the recipient
