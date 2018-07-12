@@ -10,7 +10,7 @@ const OneToken = new BigNumber(web3.toWei(1, "ether"));
 const OrcaToken = artifacts.require("TestOrcaToken");
 const RandomContract = artifacts.require("RandomContract");
 
-contract.only('Orca Token', async accounts => {
+contract('Orca Token', async accounts => {
     const admin = accounts[0];
     const user1 = accounts[1];
     const user2 = accounts[2];
