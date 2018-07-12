@@ -1,8 +1,8 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
-import "eip820/contracts/ERC820Implementer.sol";
+import "./eip820/contracts/ERC820Implementer.sol";
 import "./erc777/contracts/ERC20Token.sol";
 import "./erc777/contracts/ERC777Token.sol";
 import "./erc777/contracts/ERC777TokensSender.sol";
@@ -71,13 +71,6 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
     /// @return the balance of `_tokenAddress`.
     function balanceOf(address _tokenHolder) public view returns (uint256) { return balances[_tokenHolder]; }
 
-    /// @notice Send `_amount` of tokens to address `_to`
-    /// @param _to The address of the recipient
-    /// @param _amount The number of tokens to be sent
-    function send(address _to, uint256 _amount) public {
-        doSend(msg.sender, _to, _amount, "", msg.sender, "", true);
-    }
-
     /// @notice Send `_amount` of tokens to address `_to` passing `_userData` to the recipient
     /// @param _to The address of the recipient
     /// @param _amount The number of tokens to be sent
@@ -131,10 +124,10 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
         totalSupply_ = totalSupply_.add(_amount);
         balances[_tokenHolder] = balances[_tokenHolder].add(_amount);
 
-        callRecipient(msg.sender, 0x0, _tokenHolder, _amount, "", "", true);
+        callRecipient(msg.sender, address(0), _tokenHolder, _amount, "", "", true);
 
         emit Minted(msg.sender, _tokenHolder, _amount, "");
-        if (erc20compatible) { emit Transfer(0x0, _tokenHolder, _amount); }
+        if (erc20compatible) { emit Transfer(address(0), _tokenHolder, _amount); }
     }
 
     /// @notice Burns `_amount` tokens from `_tokenHolder`
@@ -143,15 +136,15 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
     function burn(uint256 _amount, bytes _userData, bytes _operatorData) public canBurn {
         requireMultiple(_amount);
 
-        callSender(msg.sender, msg.sender, 0x0, _amount, _userData, _operatorData);
+        callSender(msg.sender, msg.sender, address(0), _amount, _userData, _operatorData);
 
-        require(balanceOf(msg.sender) >= _amount);
+        require(balances[msg.sender] >= _amount);
 
         balances[msg.sender] = balances[msg.sender].sub(_amount);
         totalSupply_ = totalSupply_.sub(_amount);
 
         emit Burned(msg.sender, msg.sender, _amount, _userData, _operatorData);
-        if (erc20compatible) { emit Transfer(msg.sender, 0x0, _amount); }
+        if (erc20compatible) { emit Transfer(msg.sender, address(0), _amount); }
     }
 
     /* -- ERC20 Compatible Methods -- */
@@ -168,14 +161,14 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
     ///  by the owner.
     function disableERC20() public onlyOwner {
         erc20compatible = false;
-        setInterfaceImplementation("ERC20Token", 0x0);
+        setInterfaceImplementation("ERC20Token", address(0));
     }
 
     /// @notice Re enables the ERC20 interface. This function can only be called
     ///  by the owner.
     function enableERC20() public onlyOwner {
         erc20compatible = true;
-        setInterfaceImplementation("ERC20Token", this);
+        setInterfaceImplementation("ERC20Token", address(this));
     }
 
     /// @notice For Backwards compatibility
@@ -230,18 +223,18 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
      * @dev Function to stop minting new tokens.
      * @return True if the operation was successful.
      */
-    function finishMinting() onlyOwner canMint public returns (bool) {
+    function finishMinting() public onlyOwner canMint returns (bool) {
       state = State.Trading;
       emit MintFinished();
       return true;
     }
 
-    function enableBurn(bool enable) onlyOwner public returns (bool) {
+    function enableBurn(bool enable) public onlyOwner returns (bool) {
         require(state == State.Trading || state == State.Burning);
         state = (enable ? State.Burning : State.Trading);
     }
 
-    function setThrowOnIncompatibleContract(bool _throwOnIncompatibleContract) onlyOwner public {
+    function setThrowOnIncompatibleContract(bool _throwOnIncompatibleContract) public onlyOwner {
         throwOnIncompatibleContract = _throwOnIncompatibleContract;
     }
 
@@ -322,7 +315,7 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
         bool _preventLocking
     ) private {
         address recipientImplementation = interfaceAddr(_to, "ERC777TokensRecipient");
-        if (recipientImplementation != 0) {
+        if (recipientImplementation != address(0)) {
             ERC777TokensRecipient(recipientImplementation).tokensReceived(
                 _operator, _from, _to, _amount, _userData, _operatorData);
         } else if (throwOnIncompatibleContract && _preventLocking) {
@@ -349,7 +342,7 @@ contract OrcaToken is TokenRecoverable, ERC20Token, ERC777Token, ERC820Implement
         bytes _operatorData
     ) private {
         address senderImplementation = interfaceAddr(_from, "ERC777TokensSender");
-        if (senderImplementation != 0) {
+        if (senderImplementation != address(0)) {
             ERC777TokensSender(senderImplementation).tokensToSend(
                 _operator, _from, _to, _amount, _userData, _operatorData);
         }

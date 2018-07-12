@@ -1,8 +1,8 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import { ERC777Token } from "./erc777/contracts/ERC777Token.sol";
 import { ERC777TokensRecipient } from "./erc777/contracts/ERC777TokensRecipient.sol";
-import { ERC820Implementer } from "eip820/contracts/ERC820Implementer.sol";
+import { ERC820Implementer } from "./eip820/contracts/ERC820Implementer.sol";
 
 
 /**
@@ -43,12 +43,11 @@ contract ERC777TokenTimelock is ERC820Implementer, ERC777TokensRecipient {
         uint256 amount = token.balanceOf(address(this));
         require(amount > 0);
 
-        token.send(beneficiary, amount);
+        token.send(beneficiary, amount, "");
     }
 
-
     // solhint-disable-next-line no-unused-vars
-    function tokensReceived(address operator, address from, address to, uint amount, bytes userData, bytes operatorData) public {
+    function tokensReceived(address, address, address, uint256, bytes, bytes) public {
 
     }
 }

@@ -1,10 +1,10 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import { ERC777Token } from "./erc777/contracts/ERC777Token.sol";
 import { ERC777TokensRecipient } from "./erc777/contracts/ERC777TokensRecipient.sol";
 import { Ownable } from "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 import { SafeMath } from "openzeppelin-solidity/contracts/math/SafeMath.sol";
-import { ERC820Implementer } from "eip820/contracts/ERC820Implementer.sol";
+import { ERC820Implementer } from "./eip820/contracts/ERC820Implementer.sol";
 
 
 contract ERC777TokenScheduledTimelock is ERC820Implementer, ERC777TokensRecipient, Ownable {
@@ -55,13 +55,12 @@ contract ERC777TokenScheduledTimelock is ERC820Implementer, ERC777TokensRecipien
         }
         if (tokens > 0) {
             totalVested = totalVested.sub(tokens);
-            token.send(_to, tokens);
+            token.send(_to, tokens, "");
             emit Released(_to, tokens);
         }
     }
 
-    // solhint-disable-next-line no-unused-vars
-    function tokensReceived(address operator, address from, address to, uint256 amount, bytes userData, bytes operatorData) public {
+    function tokensReceived(address, address, address, uint256, bytes, bytes) public {
 
     }
 

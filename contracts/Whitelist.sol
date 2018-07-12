@@ -1,4 +1,4 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 
@@ -7,7 +7,7 @@ contract Whitelist is Ownable {
     mapping(address => uint256) public whitelist;
 
     event Whitelisted(address indexed who);
-    
+
     uint256 public nextUserId = 1;
 
     function addAddress(address who) external onlyOwner {

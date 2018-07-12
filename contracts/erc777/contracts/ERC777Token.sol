@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-pragma solidity ^0.4.23; // solhint-disable-line compiler-fixed
+pragma solidity ^0.4.24; // solhint-disable-line compiler-fixed
 
 
 contract ERC777Token {
@@ -12,7 +12,6 @@ contract ERC777Token {
     function granularity() public view returns (uint256);
     function balanceOf(address owner) public view returns (uint256);
 
-    function send(address to, uint256 amount) public;
     function send(address to, uint256 amount, bytes userData) public;
 
     function authorizeOperator(address operator) public;

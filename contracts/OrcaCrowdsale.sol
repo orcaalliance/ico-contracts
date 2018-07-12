@@ -1,4 +1,4 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "./OrcaToken.sol";
@@ -162,7 +162,7 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         uint256 weiToReturn = 0;
 
         uint256 excessTokens = updateStageCap(tokens);
-        
+
         if (excessTokens > 0) { // out of tokens
             uint256 usdToReturn = tokensToUsd(excessTokens, stageIndex);
             usdReceived = usdReceived.sub(usdToReturn);
