@@ -1,4 +1,4 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 import { ERC777Token } from "./erc777/contracts/ERC777Token.sol";
 import { ERC777TokensRecipient } from "./erc777/contracts/ERC777TokensRecipient.sol";
