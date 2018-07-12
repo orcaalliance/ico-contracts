@@ -8,15 +8,15 @@ contract ExchangeRateConsumer is Ownable {
 
     uint256 public exchangeRate = 500000; // by default exchange rate is $500 with EXCHANGE_RATE_DECIMALS precision
 
-    address public exhcnageRateOracle;
+    address public exchangeRateOracle;
 
     function setExchangeRateOracle(address _exchangeRateOracle) public onlyOwner {
         require(_exchangeRateOracle != address(0));
-        exhcnageRateOracle = _exchangeRateOracle;
+        exchangeRateOracle = _exchangeRateOracle;
     }
 
     function setExchangeRate(uint256 _exchangeRate) public {
-        require(msg.sender == exhcnageRateOracle || msg.sender == owner);
+        require(msg.sender == exchangeRateOracle || msg.sender == owner);
         require(_exchangeRate > 0);
         exchangeRate = _exchangeRate;
     }
