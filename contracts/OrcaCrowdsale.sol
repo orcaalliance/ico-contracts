@@ -130,7 +130,7 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         require(_receiver != address(0));
         require(_amount > 0);
 
-        uint256 excessTokens = updateStageCap(amount);
+        uint256 excessTokens = updateStageCap(_amount);
 
         token.mint(_receiver, _amount.sub(excessTokens));
 
