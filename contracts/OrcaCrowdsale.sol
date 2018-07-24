@@ -123,6 +123,22 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         }
     }
 
+    function mintToken(address _receiver, uint256 _amount) external {
+        require(msg.sender == tokenMinter || msg.sender == owner);
+        require(!isFinalized);
+        require(currentStage < stages.length);
+        require(_receiver != address(0));
+        require(_amount > 0);
+
+        uint256 excessTokens = updateStageCap(amount);
+
+        token.mint(_receiver, _amount.sub(excessTokens));
+
+        if (excessTokens > 0) {
+            emit ManualTokenMintRequiresRefund(_receiver, excessTokens); // solhint-disable-line
+        }
+    }
+
     function mintTokens(address[] _receivers, uint256[] _amounts) external {
         require(msg.sender == tokenMinter || msg.sender == owner);
         require(_receivers.length > 0 && _receivers.length <= 100);
