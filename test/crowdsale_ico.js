@@ -10,7 +10,12 @@ const OneToken = new BigNumber(web3.toWei(1, 'ether'));
 
 const OrcaCrowdsale = artifacts.require("TestOrcaCrowdsale");
 const OrcaToken = artifacts.require("TestOrcaToken");
-const Whitelist = artifacts.require("Whitelist");
+const Whitelist = artifacts.require("TestWhitelist");
+
+const START_DATE = 0;
+const END_DATE = 1;
+const BONUS = 4;
+const MAX_PRIORITY_ID = 5;
 
 contract('OrcaCrowdsale ICO', async accounts => {
 	const user1 = accounts[1];
@@ -18,8 +23,7 @@ contract('OrcaCrowdsale ICO', async accounts => {
 	let token;
 	let whitelist;
 	let tokenPrice;
-	let start;
-	let end;
+	let stage0;
 	let usdExchangeRate;
 
 	function ethToTokens(wei, bonus) {
@@ -31,8 +35,15 @@ contract('OrcaCrowdsale ICO', async accounts => {
 		[token, whitelist] = await Promise.all([OrcaToken.new(), Whitelist.new()]);
 		contract = await OrcaCrowdsale.new(token.address, whitelist.address);
 		await token.transferOwnership(contract.address);
-		await contract.setNow(0);
-		[start, end, tokenPrice, usdExchangeRate] = await Promise.all([contract.START_TIME(), contract.END_TIME(), contract.TOKEN_PRICE(), contract.exchangeRate()]);
+		await Promise.all([
+			contract.setNow(0),
+			contract.initialize()
+		]);
+		[stage0, tokenPrice, usdExchangeRate] = await Promise.all([
+			contract.stages(0),
+			contract.getTokenPrice(), 
+			contract.exchangeRate()
+		]);
 	});
 
 	it('should not accept funds before ICO start', async () => {
@@ -44,7 +55,7 @@ contract('OrcaCrowdsale ICO', async accounts => {
 	});
 
 	it('should not accept funds after startTime from non whitelisted addresses', async () => {
-		await contract.setNow(start.add(1));
+		await contract.setNow(stage0[START_DATE].add(1));
 
 		await contract.sendTransaction({
 			from: user1,
@@ -62,48 +73,81 @@ contract('OrcaCrowdsale ICO', async accounts => {
 			gas: 200000
 		});
 
-		const bonus = await contract.getStageBonus(0);
-		const balance = await token.balanceOf(user1);
-		balance.should.be.bignumber.equal(ethToTokens(OneEther, bonus).floor());
+		(await token.balanceOf(user1)).should.be.bignumber.equal(ethToTokens(OneEther, stage0[BONUS]).floor());
 	});
 
-	it('should not accept payments from late users in first 24 hours after crowdsale start', async() => {
-		await whitelist.addAddresses(accounts.slice(2, 53));
+	it('should not accept payments from late users in first 24 hours after stage start', async () => {
+		await whitelist.setNextUserId(stage0[MAX_PRIORITY_ID].add(1));
+
+		await whitelist.addAddress(accounts[2]);
 
 		await contract.sendTransaction({
-			from: accounts[52],
+			from: accounts[2],
 			value: OneEther,
 			gas: 200000
 		}).should.be.rejected;
 	});
 
-	it('should accept payments from late users in after 24 hours after crowdsale start', async () => {
-		await contract.setNow(start.add(86400 + 1)); // 1 day + 1 second
+	it('should accept payments from late users in after 48 hours after stage start', async () => {
+		await contract.setNow(stage0[START_DATE].add(49 * 60 * 60)); // 49 hours
 
 		await contract.sendTransaction({
-			from: accounts[52],
+			from: accounts[2],
 			value: OneEther,
 			gas: 200000
 		}).should.be.fulfilled;
 
-		(await token.balanceOf(accounts[52])).should.be.bignumber.above(0);
+		(await token.balanceOf(accounts[2])).should.be.bignumber.above(0);
+	});
+
+	it('should add stage', async () => {
+		await contract.addStage(stage0[END_DATE].add(1), stage0[END_DATE].add(48 * 60 * 60), OneToken.mul(1000), 0, stage0[MAX_PRIORITY_ID], 24 * 60 * 60);
+
+		(await contract.getStageCount()).should.be.bignumber.equal(2);
 	});
 
 	it('should correctly pass from stage 0 to stage 1', async () => {
-		const balanceBefore = await token.balanceOf(user1);
+		await contract.setNow(stage0[END_DATE].add(2));
+
+		(await contract.currentStage()).should.be.bignumber.equal(0);
 
 		await contract.sendTransaction({
 			from: user1,
-			value: OneEther.mul(3800),
+			value: OneEther.mul(3),
 			gas: 200000
 		});
 
 		(await contract.currentStage()).should.be.bignumber.equal(1);
-
-		const [bonus, balanceAfter] = await Promise.all([contract.getStageBonus(0), token.balanceOf(user1)]);
-
-		(balanceAfter.minus(balanceBefore)).should.be.bignumber.equal(ethToTokens(OneEther.mul(3800), bonus).floor());
 	});
+
+	it('should add two stages', async () => {
+		const stage1 = await contract.stages(1);
+		
+		await contract.addStage(stage1[END_DATE].add(1), stage1[END_DATE].add(48 * 60 * 60), OneToken.mul(1000), 0, stage1[MAX_PRIORITY_ID], 24 * 60 * 60);
+
+		const stage2 = await contract.stages(2);
+
+		await contract.addStage(stage2[END_DATE].add(1), stage2[END_DATE].add(48 * 60 * 60), OneToken.mul(1000), 0, stage2[MAX_PRIORITY_ID], 24 * 60 * 60);
+
+		(await contract.getStageCount()).should.be.bignumber.equal(4);
+	});
+
+	it('should correctly pass from stage 1 to stage 3', async () => {
+		const stage2 = await contract.stages(2);
+
+		await contract.setNow(stage2[END_DATE].add(1));
+
+		(await contract.currentStage()).should.be.bignumber.equal(1);
+
+		await contract.sendTransaction({
+			from: user1,
+			value: OneEther.mul(3),
+			gas: 200000
+		});
+
+		(await contract.currentStage()).should.be.bignumber.equal(3);
+	});
+	
 
 	it('should not accept payments from late users in first 24 hours after stage change', async () => {
 		await whitelist.addAddresses(accounts.slice(53, 104));
@@ -131,13 +175,20 @@ contract('OrcaCrowdsale ICO', async accounts => {
 		await contract.finalize().should.be.rejected;
 	});
 
+	it('should add pre sale tokens', async () => {
+		await contract.setPreSaleTokens(OneToken.mul(10));
+
+		(await contract.preSaleTokens()).should.be.bignumber.equal(OneToken.mul(10));
+	});
+
 	it('should fail to finalize ICO without minting pre sale tokens', async () => {
-		await contract.setNow(end.add(1));
+		const stage1 = await contract.stages(1);
+		await contract.setNow(stage1[END_DATE].add(1));
 		await contract.finalize().should.be.rejected;
 	});
 
 	it('should mint pre sale tokens', async () => {
-		const preSaleTokensLeft = await contract.preSaleTokensLeft();
+		const preSaleTokens = await contract.preSaleTokens();
 		const receivers = [];
 		const amounts = [];
 		const locks = [];
@@ -145,17 +196,16 @@ contract('OrcaCrowdsale ICO', async accounts => {
 
 		for (let i = 0; i < 100; i++) {
 			receivers.push(user1);
-			amounts.push(preSaleTokensLeft.div(100));
+			amounts.push(preSaleTokens.div(100));
 			locks.push(now.add(365 * 24 * 60 * 60));
 		}
 		await contract.mintPreSaleTokens(receivers, amounts, locks).should.be.fulfilled;
 	});
 
 	it('should successfully finalize ICO', async () => {
-		const totalSupply = await token.totalSupply();
-		const expectedTotalSupply = totalSupply.mul(100).div(60).floor(); // 40% above sold tokens goes to bounty, reserve, team and advisors
-		await contract.finalize().should.be.fulfilled;
+		const stage3 = await contract.stages(3);
+		await contract.setNow(stage3[END_DATE].add(1));
 
-		(await token.totalSupply()).should.be.bignumber.equal(expectedTotalSupply);
+		await contract.finalize().should.be.fulfilled;
 	});
 });

@@ -21,7 +21,7 @@ contract('ERC777Token Scheduled Timelock', async accounts => {
         token = await OrcaToken.new();
         vesting = await ERC777TokenScheduledTimelock.new(token.address);
         await vesting.setNow(1);
-        await token.mint(vesting.address, OneToken.mul(10));
+        await token.mint(vesting.address, OneToken.mul(10), '');
         await token.finishMinting(); // to allow sending
     });
 

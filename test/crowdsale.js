@@ -5,13 +5,16 @@ require('chai')
 	.use(require('chai-bignumber')(BigNumber))
 	.should();
 
-const OneEther = new BigNumber(web3.toWei(1, 'ether'));
 const OneToken = new BigNumber(web3.toWei(1, 'ether'));
 
 const OrcaCrowdsale = artifacts.require("OrcaCrowdsale");
 const OrcaToken = artifacts.require("OrcaToken");
 const TestOrcaCrowdsale = artifacts.require("TestOrcaCrowdsale");
 const Whitelist = artifacts.require("Whitelist");
+const OrcaBounties = artifacts.require("OrcaBounties");
+
+const END_DATE = 1;
+const MAX_PRIORITY_ID = 5;
 
 contract('OrcaCrowdsale', async accounts => {
 	const admin = accounts[0];
@@ -19,33 +22,21 @@ contract('OrcaCrowdsale', async accounts => {
 	const user2 = accounts[2];
 	let contract;
 	let token;
-	let start;
-	let end;
+	let bounties;
 	before(async () => {
 		contract = await OrcaCrowdsale.deployed();
 		token = await OrcaToken.at(await contract.token());
-		[start, end] = await Promise.all([contract.START_TIME(), contract.END_TIME()]);
-	});
+		bounties = await OrcaBounties.deployed();
 
-	it('sum of all percents is 100', async () => {
-		const [ico, partner, bounty, team, advisors] = await Promise.all([
-			contract.ICO_PERCENT(),
-			contract.PARTNER_PERCENT(),
-			contract.BOUNTY_PERCENT(),
-			contract.TEAM_PERCENT(),
-			contract.FOUNDERS_PERCENT()
-		]);
-
-		ico.add(partner).add(bounty).add(team).add(advisors).should.be.bignumber.equal(100);
+		stage0 = await contract.stages(0);
 	});
 
 	it('set crowdsale contract as OrcaToken owner', async () => {
 		(await token.owner()).should.be.equal(contract.address);
 	});
 
-	it('ICO period should be 30 days', async () => {
-		const icoPeriodInSecs = (60 * 60 * 24 * 30);
-		(end - start).should.be.equal(icoPeriodInSecs);
+	it('should have one stage', async () => {
+		(await contract.getStageCount()).should.be.bignumber.equal(1);
 	});
 
 	it('starts from zero stage', async () => {
@@ -99,6 +90,12 @@ contract('OrcaCrowdsale', async accounts => {
 		}).should.be.rejected;
 	});
 
+	it('fails to send tokens before ICO end', async () => {
+		await token.send(user1, OneToken, '', {
+			from: user2
+		}).should.be.rejected;
+	});
+
 	it('mints to many addresses', async () => {
 		await contract.mintTokens([user1, user2], [OneToken, OneToken], {
 			from: user1
@@ -138,18 +135,27 @@ contract('OrcaCrowdsale', async accounts => {
 		}).should.be.rejected;
 	});
 
+	it('allows to set pre sale tokens', async () => {
+		const tokens = OneToken.mul(10);
+		await contract.setPreSaleTokens(tokens);
+		(await contract.preSaleTokens()).should.be.bignumber.equal(tokens);
+	});
+
+	it('fails to set pre sale tokens twice', async () => {
+		await contract.setPreSaleTokens(OneToken.mul(20)).should.be.rejected;
+	});
+
 	it('mints pre sale tokens', async () => {
-		const preSaleTokens = await contract.preSaleTokensLeft();
+		const preSaleTokens = await contract.preSaleTokens();
 		preSaleTokens.should.be.bignumber.above(0);
 		await contract.mintPreSaleTokens([user1], [preSaleTokens], [Date.now() + 365 * 24 * 60 * 60]);
-		(await contract.preSaleTokensLeft()).should.be.bignumber.equal(0);
+		(await contract.preSaleTokens()).should.be.bignumber.equal(0);
 	});
 
 	it('manually mints all left tokens', async () => {
+		const tx = await contract.mintTokens([user1], [OneToken.mul(100000000000)]);
 
-		const tx = await contract.mintTokens([user1], [OneToken.mul(10000000000)]);
-
-		(await token.totalSupply()).should.be.bignumber.equal(await contract.ICO_TOKENS());
+		(await contract.icoTokensLeft()).should.be.bignumber.equal(0);
 
 		(tx.logs[0].event).should.be.equal('ManualTokenMintRequiresRefund');
 	});
@@ -178,32 +184,147 @@ contract('OrcaCrowdsale', async accounts => {
 		await contract.setExchangeRate(200);
 		(await contract.exchangeRate()).should.be.bignumber.equal(200);
 	});
+
+	it('should mint bounty tokens', async () => {
+		await contract.mintBounty([user2], [OneToken]);
+
+		(await contract.bountyBalances(user2)).should.be.bignumber.equal(OneToken);
+	});
+
+	it('bounty tokens should be visible in bounties', async () => {
+		(await bounties.bountyOf(user2)).should.be.bignumber.equal(OneToken);
+	});
+
+	it('should be possible to claim bounty tokens', async () => {
+		const balanceBefore = await token.balanceOf(user2);
+
+		await contract.claimBounty(user2);
+
+		const balanceAfter = await token.balanceOf(user2);
+
+		(balanceAfter.sub(balanceBefore)).should.be.bignumber.equal(OneToken);
+	});
+
+	it('should be possible to claim bounty tokens through sending ETH to bounties contract', async () => {
+		await contract.mintBounty([user2], [OneToken]);
+
+		const balanceBefore = await token.balanceOf(user2);
+
+		await bounties.sendTransaction({
+			from: user2,
+			value: 0,
+			gas: 300000
+		});
+
+		const balanceAfter = await token.balanceOf(user2);
+
+		(balanceAfter.sub(balanceBefore)).should.be.bignumber.equal(OneToken);
+	});
+
+	it('should fail to claim bounty tokens when there are not bounty tokens left', async () => {
+		await contract.claimBounty(user2).should.be.rejected;
+	});
+
+	it('should not be possible to claim after finalize() call', async () => {
+		await contract.mintBounty([user2], [OneToken]);
+		(await contract.bountyBalances(user2)).should.be.bignumber.equal(OneToken);
+
+		await contract.finalize();
+
+		await contract.claimBounty(user2).should.be.rejected;
+	});
+});
+
+contract('OrcaCrowdsale staging', async () => {
+	let contract;
+	let token;
+	let whitelist;
+	let stage0;
+	let stage1;
+
+	before(async () => {
+		[token, whitelist] = await Promise.all([OrcaToken.new(), Whitelist.new()])
+		contract = await TestOrcaCrowdsale.new(token.address, whitelist.address)
+		await token.transferOwnership(contract.address);
+		await contract.initialize()
+		stage0 = await contract.stages(0)
+	});
+
+	it('successfully adds stage', async () => {
+		await contract.addStage(stage0[END_DATE].add(1), stage0[END_DATE].add(2), 10, 0, stage0[MAX_PRIORITY_ID], 0);
+		(await contract.getStageCount()).should.be.bignumber.equal(2)
+
+		stage1 = await contract.stages(1)
+	});
+
+	it('fails to add stage if startDate is less than current time', async () => {
+		await contract.addStage(0, stage1[END_DATE].add(1), 10, 0, stage1[MAX_PRIORITY_ID], 0).should.be.rejected;
+	});
+
+	it('fails to add stage if startDate is not greater than end date of last stage', async () => {
+		await contract.addStage(stage1[END_DATE], stage1[END_DATE].add(3), 10, 0, stage1[MAX_PRIORITY_ID], 0).should.be.rejected;
+	});
+
+	it('fails to add stage with endDate less than startDate', async () => {
+		await contract.addStage(stage1[END_DATE].add(10), stage1[END_DATE].add(9), 10, 0, stage1[MAX_PRIORITY_ID], 0).should.be.rejected;
+	});
+
+	it('fails to add stage with endDate equals startDate', async () => {
+		await contract.addStage(stage1[END_DATE].add(10), stage1[END_DATE].add(10), 10, 0, stage1[MAX_PRIORITY_ID], 0).should.be.rejected;
+	});
+
+	it('fails to add stage with priority date after endDate', async () => {
+		await contract.addStage(stage1[END_DATE].add(10), stage1[END_DATE].add(11), 10, 0, stage1[MAX_PRIORITY_ID], 5).should.be.rejected;
+	});
+
+	it('fails to add stage with too large cap', async () => {
+		await contract.addStage(stage1[END_DATE].add(10), stage1[END_DATE].add(11), OneToken.mul(1000000000), 0, stage1[MAX_PRIORITY_ID], 0).should.be.rejected;
+	});
+
+	it('fails to add stage with small max priority id', async () => {
+		await contract.addStage(stage1[END_DATE].add(10), stage1[END_DATE].add(11), 10, 0, 0, 0).should.be.rejected;
+	});
+
+	it('successfully calls finalize()', async () => {
+		await contract.setNow(stage1[END_DATE].add(10));
+		await contract.finalize();
+	});
+
+	it('fails to add stage after finalize() call', async () => {
+		await contract.addStage(stage1[END_DATE].add(100), stage1[END_DATE].add(200), 0, 0, stage1[MAX_PRIORITY_ID], 0).should.be.rejected;
+	});
 });
 
 contract('OrcaCrowdsale convert functions', async accounts => {
 	let token;
 	let contract;
 	let whitelist;
+	let stage0;
 
 	before(async () => {
 		[token, whitelist] = await Promise.all([OrcaToken.new(), Whitelist.new()]);
 		contract = await TestOrcaCrowdsale.new(token.address, whitelist.address);
+		await token.transferOwnership(contract.address);
+		await contract.initialize();
+
+		stage0 = await contract.stages(0);
+		await contract.addStage(stage0[END_DATE].add(1), stage0[END_DATE].add(2), 10, 0, stage0[MAX_PRIORITY_ID], 0);
 	});
 
 	it('should convert usd to tokens', async () => {
-		(await contract.usdToTokensTest(600, 2)).should.be.bignumber.equal(10000);
+		(await contract.usdToTokensTest(600, 1)).should.be.bignumber.equal(10000);
 	});
 
 	it('should convert tokens to usd', async () => {
-		(await contract.tokensToUsdTest(10000, 2)).should.be.bignumber.equal(600);
+		(await contract.tokensToUsdTest(10000, 1)).should.be.bignumber.equal(600);
 	});
 
 	it('should convert usd to tokens with bonus', async () => {
-		(await contract.usdToTokensTest(600, 0)).should.be.bignumber.equal(13500);
+		(await contract.usdToTokensTest(600, 0)).should.be.bignumber.equal(12000);
 	});
 
 	it('should convert usd to tokens with bonus', async () => {
-		(await contract.tokensToUsdTest(13500, 0)).should.be.bignumber.equal(600);
+		(await contract.tokensToUsdTest(12000, 0)).should.be.bignumber.equal(600);
 	});
 
 });

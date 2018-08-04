@@ -13,16 +13,22 @@ const OrcaToken = artifacts.require("TestOrcaToken");
 const Whitelist = artifacts.require("Whitelist");
 const ERC777TokenScheduledTimelock = artifacts.require("ERC777TokenScheduledTimelock");
 
+const START_DATE = 0;
+const END_DATE = 1;
+const BONUS = 4;
+const MAX_PRIORITY_ID = 5;
+
 contract('OrcaCrowdsale Good ICO, Token Hard Cap reached', async accounts => {
     const user1 = accounts[1];
     const user2 = accounts[2];
+    const preSaleTokens = OneToken.mul(1000);
     let contract;
     let token;
     let whitelist;
     let tokenPrice;
-    let start;
-    let end;
     let walletBalance;
+    let usdExchangeRate;
+    let stage0;
 
     function ethToTokens(wei, bonus) {
         const usd = wei.mul(usdExchangeRate).div(1000);
@@ -32,40 +38,58 @@ contract('OrcaCrowdsale Good ICO, Token Hard Cap reached', async accounts => {
     before(async () => {
         [token, whitelist] = await Promise.all([OrcaToken.new(), Whitelist.new()]);
         contract = await OrcaCrowdsale.new(token.address, whitelist.address);
+        [tokenPrice, usdExchangeRate] = await Promise.all([contract.getTokenPrice(), contract.exchangeRate()]);
         await token.transferOwnership(contract.address);
-        await token.setNow(1);
-        [start, end, tokenPrice, usdExchangeRate] = await Promise.all([contract.START_TIME(), contract.END_TIME(), contract.TOKEN_PRICE(), contract.exchangeRate()]);
-        walletBalance = await web3.eth.getBalance(await contract.WALLET());
+        await Promise.all([
+            token.setNow(1),
+            contract.initialize()
+        ]);
+
+        stage0 = await contract.stages(0);
+
+        walletBalance = await web3.eth.getBalance(await contract.getWallet());
         await whitelist.addAddress(user1);
-        await contract.setNow(start.add(1));
+        await contract.setNow(stage0[START_DATE].add(1));
     });
 
-    it('should always work', () => {});
 
-    it('should pass from stage 0 to stage 2', async () => {
-        const balanceBefore = token.balanceOf(user1);
-
+    it('should sell tokens', async () => {
+        (await contract.currentStage()).should.be.bignumber.equal(0);
         await contract.sendTransaction({
             from: user1,
             value: OneEther.mul(7600),
             gas: 200000
         });
 
-        (await contract.currentStage()).should.be.bignumber.equal(2);
+        (await token.balanceOf(user1)).should.be.bignumber.equal(ethToTokens(OneEther.mul(7600), stage0[BONUS]).round());
     });
 
     it('have 7600 Ether on balance', async () => {
-        const walletBalanceAfter = await web3.eth.getBalance(await contract.WALLET());
+        const walletBalanceAfter = await web3.eth.getBalance(await contract.getWallet());
 
         (walletBalanceAfter.sub(walletBalance)).should.be.bignumber.equal(OneEther.mul(7600));
     });
 
-    it('should mint pre sale tokens', async () => {
-        await contract.mintPreSaleTokens([user1], [await contract.preSaleTokensLeft()], [Date.now() + 365 * 24 * 60 * 60]);
+    it('should set preSaleTokens', async () => {
+        await contract.setPreSaleTokens(preSaleTokens);
+        (await contract.preSaleTokens()).should.be.bignumber.equal(preSaleTokens);
     });
 
-    it('should mint and send ether until token cap', async () => {
+    it('should mint pre sale tokens', async () => {
+        await contract.mintPreSaleTokens([user1], [await contract.preSaleTokens()], [Date.now() + 365 * 24 * 60 * 60]);
+    });
+
+    it('should mint many tokens', async () => {
         await contract.mintTokens([user1], [OneToken.mul(50000000)]);
+    });
+
+    it('should add stage', async () => {
+        await contract.addStage(stage0[END_DATE].add(1), stage0[END_DATE].add(48 * 60 * 60), OneToken.mul(10000000), 10, stage0[MAX_PRIORITY_ID], 24 * 60 * 60);
+    });
+
+    it('should buy all tokens', async () => {
+        const stage1 = await contract.stages(1);
+        await contract.setNow(stage1[START_DATE].add(1));
 
         await contract.sendTransaction({
             from: user1,
@@ -73,19 +97,20 @@ contract('OrcaCrowdsale Good ICO, Token Hard Cap reached', async accounts => {
             gas: 300000
         });
 
-        const totalSupply = await token.totalSupply();
-        (await contract.ICO_TOKENS()).should.be.bignumber.equal(totalSupply);
+        (await contract.icoTokensLeft()).should.be.bignumber.equal(0);
     });
 
     it('should successfully finalize successfull ICO before end', async () => {
-        await contract.setNow(end.sub(1));
+        const stage1 = await contract.stages(1);
+
+        await contract.setNow(stage1[END_DATE].sub(1));
         await contract.finalize().should.be.fulfilled;
     });
 
     it('should reject tx after finalize()', async () => {
         await contract.sendTransaction({
             from: user1,
-            value: 0
+            value: OneEther
         }).should.be.rejected;
     });
 
@@ -94,64 +119,37 @@ contract('OrcaCrowdsale Good ICO, Token Hard Cap reached', async accounts => {
     });
 
     it('should finish minting', async () => {
-        (await token.state()).should.be.bignumber.equal(1); // Trading
+        (await token.mintingFinished()).should.be.equal(true);
     });
 
-    it('should correctly mint tokens on finalize', async () => {
+    it('should correctly mint tokens to partners,advisors,...', async () => {
         const [
-            soldTokens,
-            icoTokens,
-            totalSupply,
-            icoPercent,
-            partnerPercent,
-            bountyPercent,
-            teamPercent,
-            advisorsPercent,
             partnerWallet,
-            bountyWallet,
-            timelock,
-            preSaleTokens
+            advisorsWallet,
+            timelock
         ] =
         await Promise.all([
-            token.balanceOf(user1),
-            contract.ICO_TOKENS(),
-            token.totalSupply(),
-            contract.ICO_PERCENT(),
-            contract.PARTNER_PERCENT(),
-            contract.BOUNTY_PERCENT(),
-            contract.TEAM_PERCENT(),
-            contract.FOUNDERS_PERCENT(),
-            contract.PARTNER_WALLET(),
-            contract.BOUNTY_WALLET(),
-            contract.timelock(),
-            contract.PRE_SALE_TOKENS()
+            contract.getPartnerWallet(),
+            contract.getAdvisorsWallet(),
+            contract.timelock()
         ]);
 
-        const [partnerBalance, bountyBalance, timelockBalance] = await Promise.all([
+        const [partnerBalance, advisorsBalance, timelockBalance] = await Promise.all([
             token.balanceOf(partnerWallet),
-            token.balanceOf(bountyWallet),
+            token.balanceOf(advisorsWallet),
             token.balanceOf(timelock)
         ]);
 
-        (await token.balanceOf(await contract.TEAM_WALLET())).should.be.bignumber.equal(0);
-        (await token.balanceOf(await contract.FOUNDERS_WALLET())).should.be.bignumber.equal(0);
-
-        const totalSold = soldTokens.add(preSaleTokens);
-
-        const expectedPartnerTokens = totalSold.mul(partnerPercent).div(icoPercent).floor();
-        partnerBalance.should.be.bignumber.equal(expectedPartnerTokens);
-        const expectedBountyTokens = totalSold.mul(bountyPercent).div(icoPercent).floor();
-        bountyBalance.should.be.bignumber.equal(expectedBountyTokens);
-        const expectedTimelockTokens = totalSold.mul(teamPercent.add(advisorsPercent)).div(icoPercent).floor();
-        timelockBalance.should.be.bignumber.equal(expectedTimelockTokens.add(preSaleTokens));
+        (await contract.getPartnerTokens()).should.be.bignumber.equal(partnerBalance);
+        (await contract.getAdvisorsTokens()).should.be.bignumber.equal(advisorsBalance);
+        (await contract.getTeamTokens()).add(preSaleTokens).should.be.bignumber.equal(timelockBalance);
     });
 
 	it('should correctly timelock tokens on finalize', async () => {
 	    const timelock = await contract.timelock();
 	    const timelockContract = ERC777TokenScheduledTimelock.at(timelock);
 
-	    (await timelockContract.schedule(await contract.TEAM_WALLET(), 0))[0].should.be.bignumber.equal(await contract.TEAM_TOKEN_LOCK_DATE());
-	    (await timelockContract.schedule(await contract.FOUNDERS_WALLET(), 0))[0].should.be.bignumber.equal(await contract.FOUNDERS_TOKEN_LOCK_DATE());
+	    (await timelockContract.schedule(await contract.getTeamWallet(), 0))[0].should.be.bignumber.equal(await contract.getTeamTokenLockDate());
 	});
 
     it('succeeds to transfer tokens after ICO end', async () => {

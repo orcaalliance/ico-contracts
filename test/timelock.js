@@ -26,7 +26,7 @@ contract('ERC777 Token Timelock', async accounts => {
 
         timelock = await ERC777TokenTimelock.new(token.address, user1, now + duration);
 
-        await token.mint(timelock.address, OneToken);
+        await token.mint(timelock.address, OneToken, '');
         await token.finishMinting();
     });
 

@@ -55,14 +55,20 @@ contract ERC777TokenScheduledTimelock is ERC820Implementer, ERC777TokensRecipien
         }
         if (tokens > 0) {
             totalVested = totalVested.sub(tokens);
-            token.send(_to, tokens, "");
+            token.send(_to, tokens, '');
             emit Released(_to, tokens);
         }
     }
 
-    function tokensReceived(address, address, address, uint256, bytes, bytes) public {
+    function releaseBatch(address[] _to) public {
+        require(_to.length > 0 && _to.length < 100);
 
+        for (uint256 i = 0; i < _to.length; i++) {
+            release(_to[i]);
+        }
     }
+
+    function tokensReceived(address, address, address, uint256, bytes, bytes) public {}
 
     function getScheduledTimelockCount(address _beneficiary) public view returns (uint256) {
         return schedule[_beneficiary].length;

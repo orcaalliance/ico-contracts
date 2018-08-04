@@ -6,7 +6,7 @@ contract ExchangeRateConsumer is Ownable {
 
     uint8 public constant EXCHANGE_RATE_DECIMALS = 3; // 3 digits precision for exchange rate
 
-    uint256 public exchangeRate = 500000; // by default exchange rate is $500 with EXCHANGE_RATE_DECIMALS precision
+    uint256 public exchangeRate = 600000; // by default exchange rate is $600 with EXCHANGE_RATE_DECIMALS precision
 
     address public exchangeRateOracle;
 

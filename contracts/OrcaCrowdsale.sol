@@ -6,59 +6,61 @@ import "./Whitelist.sol";
 import "./TokenRecoverable.sol";
 import "./ERC777TokenScheduledTimelock.sol";
 import "./ExchangeRateConsumer.sol";
+import "./CommunityLock.sol";
+import "./Debuggable.sol";
 
 
-contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
+contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer, Debuggable {
     using SafeMath for uint256;
 
     // Wallet where all ether will be stored
-    address public constant WALLET = 0x1111111111111111111111111111111111111111;
+    address internal constant WALLET = 0x0909Fb46D48eea996197573415446A26c001994a;
     // Partner wallet
-    address public constant PARTNER_WALLET = 0x2222222222222222222222222222222222222222;
-    // Bounty wallet
-    address public constant BOUNTY_WALLET = 0x3333333333333333333333333333333333333333;
+    address internal constant PARTNER_WALLET = 0x2222222222222222222222222222222222222222;
     // Team wallet
-    address public constant TEAM_WALLET = 0x4444444444444444444444444444444444444444;
+    address internal constant TEAM_WALLET = 0x3333333333333333333333333333333333333333;
     // Advisors wallet
-    address public constant FOUNDERS_WALLET = 0x5555555555555555555555555555555555555555;
+    address internal constant ADVISORS_WALLET = 0x4444444444444444444444444444444444444444;
 
-    uint256 public constant ICO_TOKENS = 276000000e18; // 276 000 000 tokens
-    uint256 public constant PRE_SALE_TOKENS = 1e18; // Exact token amount will be set befor ICO start
-    uint256 public constant START_TIME = 1523836800; // 2018/04/16 00:00 UTC
-    uint256 public constant END_TIME = 1526428800; // 2018/05/16 00:00 UTC
-    uint256 public constant TOKEN_PRICE = 6; // Token costs 0.06 USD
-    uint256 public constant TEAM_TOKEN_LOCK_DATE = 1559347200; // 2019/06/01 00:00 UTC
-    uint256 public constant FOUNDERS_TOKEN_LOCK_DATE = 1543622400; // 2018/12/01 00:00 UTC
-    uint8 public constant ICO_PERCENT = 60;
-    uint8 public constant PARTNER_PERCENT = 20;
-    uint8 public constant BOUNTY_PERCENT = 3;
-    uint8 public constant TEAM_PERCENT = 12;
-    uint8 public constant FOUNDERS_PERCENT = 5;
+    uint256 internal constant TEAM_TOKENS = 58200000e18;      // 58 200 000 tokens
+    uint256 internal constant ADVISORS_TOKENS = 20000000e18;  // 20 000 000 tokens
+    uint256 internal constant PARTNER_TOKENS = 82800000e18;   // 82 800 000 tokens
+    uint256 internal constant COMMUNITY_TOKENS = 92000000e18; // 92 000 000 tokens
+
+    uint256 internal constant TOKEN_PRICE = 6; // Token costs 0.06 USD
+    uint256 internal constant TEAM_TOKEN_LOCK_DATE = 1565049600; // 2019/08/06 00:00 UTC
 
     struct Stage {
+        uint256 startDate;
+        uint256 endDate;
+        uint256 priorityDate; // allow priority users to purchase tokens until this date
         uint256 cap;
         uint64 bonus;
         uint64 maxPriorityId;
     }
 
-    Stage[3] internal stages;
+    uint256 public icoTokensLeft = 193200000e18;   // 193 200 000 tokens for ICO
+    uint256 public bountyTokensLeft = 13800000e18; // 13 800 000 bounty tokens
+    uint256 public preSaleTokens = 0;
+
+    Stage[] public stages;
 
     // The token being sold
     OrcaToken public token;
     Whitelist public whitelist;
     ERC777TokenScheduledTimelock public timelock;
+    CommunityLock public communityLock;
 
-    // amount of raised money in USD
-    uint256 public preSaleTokensLeft = PRE_SALE_TOKENS;
-
-    uint256 public batchAllowTime = START_TIME.add(24 hours);
+    mapping(address => uint256) public bountyBalances;
 
     address public tokenMinter;
     address public teamTokenTimelock;
     address public advisorsTokenTimelock;
 
     uint8 public currentStage = 0;
+    bool public initialized = false;
     bool public isFinalized = false;
+    bool public isPreSaleTokenSet = false;
 
     /**
     * event for token purchase logging
@@ -77,37 +79,66 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
      */
     event ManualTokenMintRequiresRefund(address indexed purchaser, uint256 value);
 
+    modifier onlyInitialized() {
+        require(initialized);
+        _;
+    }
+
     constructor(address _token, address _whitelist) public {
         require(_token != address(0));
         require(_whitelist != address(0));
-        stages[0] = Stage({ bonus: 35, cap: 30000000e18, maxPriorityId: 50 }); // 30 000 000 tokens
-        stages[1] = Stage({ bonus: 30, cap: 40000000e18, maxPriorityId: 70 }); // 40 000 000 tokens
-        stages[2] = Stage({ bonus: 0, cap: uint256(206000000e18).sub(PRE_SALE_TOKENS), maxPriorityId: ~uint64(0) });  // 206 000 000 tokens
+
+        uint256 stageCap = 30000000e18; // 30 000 000 tokens
+
+        stages.push(Stage({
+            startDate: 1533546000, // 6th of August, 9:00 UTC
+            endDate: 1534064400, // 12th of August, 9:00 UTC
+            cap: stageCap,
+            bonus: 20,
+            maxPriorityId: 5000,
+            priorityDate: uint256(1533546000).add(48 hours) // 6th of August, 9:00 UTC + 48 hours
+        }));
+
+        icoTokensLeft = icoTokensLeft.sub(stageCap);
 
         token = OrcaToken(_token);
         whitelist = Whitelist(_whitelist);
         timelock = new ERC777TokenScheduledTimelock(_token);
     }
 
+    function initialize() public onlyOwner {
+        require(!initialized);
+
+        token.mint(timelock, TEAM_TOKENS, '');
+        timelock.scheduleTimelock(TEAM_WALLET, TEAM_TOKENS, TEAM_TOKEN_LOCK_DATE);
+
+        token.mint(ADVISORS_WALLET, ADVISORS_TOKENS, '');
+        token.mint(PARTNER_WALLET, PARTNER_TOKENS, '');
+
+        communityLock = new CommunityLock(token);
+        token.mint(communityLock, COMMUNITY_TOKENS, '');
+
+        initialized = true;
+    }
+
     function () external payable {
         buyTokens(msg.sender);
     }
 
-    function mintPreSaleTokens(address[] _receivers, uint256[] _amounts, uint256[] _lockPeroids) external {
+    function mintPreSaleTokens(address[] _receivers, uint256[] _amounts, uint256[] _lockPeroids) external onlyInitialized {
         require(msg.sender == tokenMinter || msg.sender == owner);
         require(_receivers.length > 0 && _receivers.length <= 100);
         require(_receivers.length == _amounts.length);
         require(_receivers.length == _lockPeroids.length);
         require(!isFinalized);
-        require(preSaleTokensLeft > 0);
-        uint256 totalBatchTokens = 0;
+        uint256 tokensInBatch = 0;
         for (uint256 i = 0; i < _amounts.length; i++) {
-            totalBatchTokens = totalBatchTokens.add(_amounts[i]);
+            tokensInBatch = tokensInBatch.add(_amounts[i]);
         }
-        require(preSaleTokensLeft >= totalBatchTokens);
+        require(preSaleTokens >= tokensInBatch);
 
-        preSaleTokensLeft = preSaleTokensLeft.sub(totalBatchTokens);
-        token.mint(timelock, totalBatchTokens);
+        preSaleTokens = preSaleTokens.sub(tokensInBatch);
+        token.mint(timelock, tokensInBatch, '');
 
         address receiver;
         uint256 lockTill;
@@ -123,28 +154,13 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         }
     }
 
-    function mintToken(address _receiver, uint256 _amount) external {
-        require(msg.sender == tokenMinter || msg.sender == owner);
-        require(!isFinalized);
-        require(currentStage < stages.length);
-        require(_receiver != address(0));
-        require(_amount > 0);
-
-        uint256 excessTokens = updateStageCap(_amount);
-
-        token.mint(_receiver, _amount.sub(excessTokens));
-
-        if (excessTokens > 0) {
-            emit ManualTokenMintRequiresRefund(_receiver, excessTokens); // solhint-disable-line
-        }
-    }
-
-    function mintTokens(address[] _receivers, uint256[] _amounts) external {
+    function mintTokens(address[] _receivers, uint256[] _amounts) external onlyInitialized {
         require(msg.sender == tokenMinter || msg.sender == owner);
         require(_receivers.length > 0 && _receivers.length <= 100);
         require(_receivers.length == _amounts.length);
         require(!isFinalized);
-        require(currentStage < stages.length);
+
+        ensureCurrentStage();
 
         address receiver;
         uint256 amount;
@@ -159,7 +175,9 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
 
             excessTokens = updateStageCap(amount);
 
-            token.mint(receiver, amount.sub(excessTokens));
+            uint256 tokens = amount.sub(excessTokens);
+
+            token.mint(receiver, tokens, '');
 
             if (excessTokens > 0) {
                 emit ManualTokenMintRequiresRefund(receiver, excessTokens); // solhint-disable-line
@@ -167,19 +185,45 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         }
     }
 
-    function buyTokens(address _beneficiary) public payable {
+    function mintBounty(address[] _receivers, uint256[] _amounts) external onlyInitialized {
+        require(msg.sender == tokenMinter || msg.sender == owner);
+        require(_receivers.length > 0 && _receivers.length <= 100);
+        require(_receivers.length == _amounts.length);
+        require(!isFinalized);
+        require(bountyTokensLeft > 0);
+
+        uint256 tokensLeft = bountyTokensLeft;
+        address receiver;
+        uint256 amount;
+        for (uint256 i = 0; i < _receivers.length; i++) {
+            receiver = _receivers[i];
+            amount = _amounts[i];
+
+            require(receiver != address(0));
+            require(amount > 0);
+
+            tokensLeft = tokensLeft.sub(amount);
+            bountyBalances[receiver] = bountyBalances[receiver].add(amount);
+        }
+
+        bountyTokensLeft = tokensLeft;
+    }
+
+    function buyTokens(address _beneficiary) public payable onlyInitialized {
         require(_beneficiary != address(0));
+        ensureCurrentStage();
         validatePurchase();
         uint256 weiReceived = msg.value;
         uint256 usdReceived = weiToUsd(weiReceived);
 
         uint8 stageIndex = currentStage;
+
         uint256 tokens = usdToTokens(usdReceived, stageIndex);
         uint256 weiToReturn = 0;
 
         uint256 excessTokens = updateStageCap(tokens);
 
-        if (excessTokens > 0) { // out of tokens
+        if (excessTokens > 0) {
             uint256 usdToReturn = tokensToUsd(excessTokens, stageIndex);
             usdReceived = usdReceived.sub(usdToReturn);
             weiToReturn = weiToReturn.add(usdToWei(usdToReturn));
@@ -187,7 +231,7 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
             tokens = tokens.sub(excessTokens);
         }
 
-        token.mint(_beneficiary, tokens);
+        token.mint(_beneficiary, tokens, '');
 
         WALLET.transfer(weiReceived);
         emit TokenPurchase(msg.sender, _beneficiary, weiReceived, usdReceived, exchangeRate, tokens); // solhint-disable-line
@@ -196,55 +240,73 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         }
     }
 
+    function ensureCurrentStage() internal {
+        uint256 currentTime = getNow();
+        uint256 stageCount = stages.length;
+
+        uint8 curStage = currentStage;
+        uint8 nextStage = curStage + 1;
+
+        while (nextStage < stageCount && stages[nextStage].startDate <= currentTime) {
+            stages[nextStage].cap = stages[nextStage].cap.add(stages[curStage].cap);
+            curStage = nextStage;
+            nextStage = nextStage + 1;
+        }
+        if (currentStage != curStage) {
+            currentStage = curStage;
+        }
+    }
+
     /**
     * @dev Must be called after crowdsale ends, to do some extra finalization
     * work. Calls the contract's finalization function.
     */
-    function finalize() public onlyOwner {
+    function finalize() public onlyOwner onlyInitialized {
         require(!isFinalized);
-        require(getNow() > END_TIME || token.totalSupply() == ICO_TOKENS);
-        require(preSaleTokensLeft == 0);
-
-        uint256 totalSupply = token.totalSupply();
-
-        uint256 teamTokens =  uint256(TEAM_PERCENT).mul(totalSupply).div(ICO_PERCENT);
-        uint256 foundersTokens =  uint256(FOUNDERS_PERCENT).mul(totalSupply).div(ICO_PERCENT);
-
-        token.mint(PARTNER_WALLET, uint256(PARTNER_PERCENT).mul(totalSupply).div(ICO_PERCENT));
-        token.mint(BOUNTY_WALLET, uint256(BOUNTY_PERCENT).mul(totalSupply).div(ICO_PERCENT));
-        token.mint(timelock, teamTokens.add(foundersTokens));
-
-        timelock.scheduleTimelock(TEAM_WALLET, teamTokens, TEAM_TOKEN_LOCK_DATE);
-        timelock.scheduleTimelock(FOUNDERS_WALLET, foundersTokens, FOUNDERS_TOKEN_LOCK_DATE);
+        require(preSaleTokens == 0);
+        Stage storage lastStage = stages[stages.length - 1];
+        require(getNow() >= lastStage.endDate || (lastStage.cap == 0 && icoTokensLeft == 0));
 
         token.finishMinting();
         token.transferOwnership(owner);
+        communityLock.transferOwnership(owner); // only in finalize just to be sure that it is the same owner as crowdsale
 
         emit Finalized(); // solhint-disable-line
 
         isFinalized = true;
     }
 
-    function setTokenMinter(address _tokenMinter) public onlyOwner {
+    function setTokenMinter(address _tokenMinter) public onlyOwner onlyInitialized {
         require(_tokenMinter != address(0));
         tokenMinter = _tokenMinter;
     }
 
+    function claimBounty(address beneficiary) public onlyInitialized {
+        uint256 balance = bountyBalances[beneficiary];
+        require(balance > 0);
+        bountyBalances[beneficiary] = 0;
+
+        token.mint(beneficiary, balance, '');
+    }
+
+    /// @notice Updates current stage cap and returns amount of excess tokens if ICO does not have enough tokens
     function updateStageCap(uint256 _tokens) internal returns (uint256) {
-        uint256 excessTokens = _tokens;
-        while (excessTokens > 0 && currentStage < stages.length) {
-            Stage storage stage = stages[currentStage];
-            if (excessTokens < stage.cap) {
-                stage.cap = stage.cap.sub(excessTokens);
-                excessTokens = 0;
-            } else {
-                excessTokens = excessTokens.sub(stage.cap);
-                stage.cap = 0;
-                currentStage++;
-                batchAllowTime = getNow().add(24 hours);
-            }
+        Stage storage stage = stages[currentStage];
+        uint256 cap = stage.cap;
+        // normal situation, early exit
+        if (cap >= _tokens) {
+            stage.cap = cap.sub(_tokens);
+            return 0;
         }
-        return excessTokens;
+
+        stage.cap = 0;
+        uint256 excessTokens = _tokens.sub(cap);
+        if (icoTokensLeft >= excessTokens) {
+            icoTokensLeft = icoTokensLeft.sub(excessTokens);
+            return 0;
+        }
+        icoTokensLeft = 0;
+        return excessTokens.sub(icoTokensLeft);
     }
 
     function weiToUsd(uint256 _wei) internal view returns (uint256) {
@@ -263,17 +325,53 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer {
         return _tokens.mul(TOKEN_PRICE).div(stages[_stage].bonus + 100);
     }
 
+    function addStage(uint256 startDate, uint256 endDate, uint256 cap, uint64 bonus, uint64 maxPriorityId, uint256 priorityTime) public onlyOwner onlyInitialized {
+        require(!isFinalized);
+        require(startDate > getNow());
+        require(endDate > startDate);
+        Stage storage lastStage = stages[stages.length - 1];
+        require(startDate > lastStage.endDate);
+        require(startDate.add(priorityTime) <= endDate);
+        require(icoTokensLeft >= cap);
+        require(maxPriorityId >= lastStage.maxPriorityId);
+
+        stages.push(Stage({
+            startDate: startDate,
+            endDate: endDate,
+            cap: cap,
+            bonus: bonus,
+            maxPriorityId: maxPriorityId,
+            priorityDate: startDate.add(priorityTime)
+        }));
+    }
+
     function validatePurchase() internal view {
         require(!isFinalized);
         require(msg.value != 0);
+
         require(currentStage < stages.length);
-        require(getNow() >= START_TIME && getNow() <= END_TIME);
-        require(token.totalSupply() < ICO_TOKENS);
+        Stage storage stage = stages[currentStage];
+        require(stage.cap > 0);
+
+        uint256 currentTime = getNow();
+        require(stage.startDate <= currentTime && currentTime <= stage.endDate);
+
         uint256 userId = whitelist.whitelist(msg.sender);
         require(userId > 0);
-        if (batchAllowTime > getNow()) {
-            require(stages[currentStage].maxPriorityId > userId);
+        if (stage.priorityDate > currentTime) {
+            require(userId < stage.maxPriorityId);
         }
+    }
+
+    function setPreSaleTokens(uint256 amount) public onlyOwner onlyInitialized {
+        require(!isPreSaleTokenSet);
+        require(amount > 0);
+        preSaleTokens = amount;
+        isPreSaleTokenSet = true;
+    }
+
+    function getStageCount() public view returns (uint256) {
+        return stages.length;
     }
 
     function getNow() internal view returns (uint256) {
