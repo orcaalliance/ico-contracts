@@ -54,8 +54,6 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer, Debuggable {
     mapping(address => uint256) public bountyBalances;
 
     address public tokenMinter;
-    address public teamTokenTimelock;
-    address public advisorsTokenTimelock;
 
     uint8 public currentStage = 0;
     bool public initialized = false;
@@ -151,6 +149,23 @@ contract OrcaCrowdsale is TokenRecoverable, ExchangeRateConsumer, Debuggable {
             require(lockTill > timestamp);
 
             timelock.scheduleTimelock(receiver, _amounts[i], lockTill);
+        }
+    }
+
+    function mintToken(address _receiver, uint256 _amount) external onlyInitialized {
+        require(msg.sender == tokenMinter || msg.sender == owner);
+        require(!isFinalized);
+        require(_receiver != address(0));
+        require(_amount > 0);
+
+        ensureCurrentStage();
+
+        uint256 excessTokens = updateStageCap(_amount);
+
+        token.mint(_receiver, _amount.sub(excessTokens), '');
+
+        if (excessTokens > 0) {
+            emit ManualTokenMintRequiresRefund(_receiver, excessTokens); // solhint-disable-line
         }
     }
 
