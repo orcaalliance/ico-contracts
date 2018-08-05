@@ -8,6 +8,7 @@ require('chai')
 const OneEther = new BigNumber(web3.toWei(1, 'ether'));
 const OneToken = new BigNumber(web3.toWei(1, 'ether'));
 
+const Multisig = artifacts.require("TestFakeMultisig");
 const OrcaCrowdsale = artifacts.require("TestOrcaCrowdsale");
 const OrcaToken = artifacts.require("OrcaToken");
 const Whitelist = artifacts.require("Whitelist");
@@ -17,48 +18,54 @@ const CAP = 3;
 
 contract('OrcaCrowdsale Complex', async accounts => {
 	const user1 = accounts[1];
+	let multisig;
 	let contract;
 	let token;
 	let whitelist;
 	let stage0;
 	before(async () => {
-		[token, whitelist] = await Promise.all([OrcaToken.new(), Whitelist.new()])
-		contract = await OrcaCrowdsale.new(token.address, whitelist.address)
-		await token.transferOwnership(contract.address)
+		[token, whitelist, multisig] = await Promise.all([OrcaToken.new(), Whitelist.new(), Multisig.new()]);
+		contract = await OrcaCrowdsale.new(token.address, whitelist.address);
+		await token.transferOwnership(contract.address);
 		await Promise.all([
 			contract.setNow(0),
 			contract.initialize()
-		])
+		]);
 
-		stage0 = await contract.stages(0)
-		await whitelist.addAddress(user1)
+		stage0 = await contract.stages(0);
+		await whitelist.addAddress(user1);
+	});
+
+	it('should be possible to mint into smartcontracts wihtout ERC777 receiver support', async () => {
+		await contract.mintToken(multisig.address, OneToken).should.be.fulfilled;
+		(await token.balanceOf(multisig.address)).should.be.bignumber.equal(OneToken);
 	});
 
 	it('should manually mint tokens', async () => {
-		let receivers = []
-		let amounts = []
+		let receivers = [];
+		let amounts = [];
 		for (let i = 0; i < 100; i++) {
-			receivers.push(user1)
-			amounts.push(OneToken)
+			receivers.push(user1);
+			amounts.push(OneToken);
 		}
 		await contract.mintTokens(receivers, amounts).should.be.fulfilled;
 
-		(await token.balanceOf(user1)).should.be.bignumber.equal(OneToken.mul(100))
+		(await token.balanceOf(user1)).should.be.bignumber.equal(OneToken.mul(100));
 	});
 
 	it('manual mint many tokens', async () => {
-		let receivers = []
-		let amounts = []
+		let receivers = [];
+		let amounts = [];
 		for (let i = 0; i < 100; i++) {
-			receivers.push(user1)
-			amounts.push(OneToken.mul(600001))
+			receivers.push(user1);
+			amounts.push(OneToken.mul(600001));
 		}
 		await contract.mintTokens(receivers, amounts).should.be.fulfilled;
 
-		(await token.balanceOf(user1)).should.be.bignumber.equal(OneToken.mul(600001).mul(100).add(OneToken.mul(100)))
+		(await token.balanceOf(user1)).should.be.bignumber.equal(OneToken.mul(600001).mul(100).add(OneToken.mul(100)));
 
 		const stage = await contract.stages(0);
-		(stage[CAP]).should.be.bignumber.equal(0)
+		(stage[CAP]).should.be.bignumber.equal(0);
 	});
 
 	it('should be possible to mint after ICO end and before finalize', async () => {

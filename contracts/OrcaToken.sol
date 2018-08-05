@@ -88,7 +88,7 @@ contract OrcaToken is TokenRecoverable, ERC777ERC20BaseToken {
         mTotalSupply = mTotalSupply.add(_amount);
         mBalances[_tokenHolder] = mBalances[_tokenHolder].add(_amount);
 
-        callRecipient(msg.sender, 0x0, _tokenHolder, _amount, "", _operatorData, true);
+        callRecipient(msg.sender, 0x0, _tokenHolder, _amount, "", _operatorData, false);
 
         emit Minted(msg.sender, _tokenHolder, _amount, _operatorData);
         if (mErc20compatible) { emit Transfer(0x0, _tokenHolder, _amount); }
